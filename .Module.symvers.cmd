@@ -1,0 +1,1 @@
+savedcmd_/home/duckanh/Documents/KeyLoggerProject/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/duckanh/Documents/KeyLoggerProject/Module.symvers -T /home/duckanh/Documents/KeyLoggerProject/modules.order -i Module.symvers -e 

