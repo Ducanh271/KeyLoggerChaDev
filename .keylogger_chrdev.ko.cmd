@@ -1,1 +1,0 @@
-savedcmd_/home/duckanh/Documents/KeyLoggerProject/keylogger_chrdev.ko := ld -r -m elf_x86_64 -z noexecstack --build-id=sha1  -T scripts/module.lds -o /home/duckanh/Documents/KeyLoggerProject/keylogger_chrdev.ko /home/duckanh/Documents/KeyLoggerProject/keylogger_chrdev.o /home/duckanh/Documents/KeyLoggerProject/keylogger_chrdev.mod.o
