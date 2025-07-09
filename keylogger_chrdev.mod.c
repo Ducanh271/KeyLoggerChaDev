@@ -35,11 +35,14 @@ MODULE_INFO(retpoline, "Y");
 
 static const struct modversion_info ____versions[]
 __used __section("__versions") = {
+	{ 0xb51d50, "cdev_add" },
+	{ 0x33c47e0e, "class_create" },
 	{ 0xf641a686, "device_create" },
 	{ 0x96554810, "register_keyboard_notifier" },
 	{ 0x122c3a7e, "_printk" },
 	{ 0x5b8239ca, "__x86_return_thunk" },
 	{ 0xc5442e07, "cdev_del" },
+	{ 0x82ee90dc, "timer_delete_sync" },
 	{ 0x6091b333, "unregister_chrdev_region" },
 	{ 0xc21bdf9, "device_destroy" },
 	{ 0xfa5cdaeb, "class_destroy" },
@@ -61,15 +64,19 @@ __used __section("__versions") = {
 	{ 0x2d3385d3, "system_wq" },
 	{ 0xc5b6f236, "queue_work_on" },
 	{ 0x54b1fac6, "__ubsan_handle_load_invalid_value" },
+	{ 0x9ec6ca96, "ktime_get_real_ts64" },
+	{ 0xfff5afc, "time64_to_tm" },
+	{ 0x656e4a6e, "snprintf" },
 	{ 0xbdfb6dbb, "__fentry__" },
+	{ 0xc6f46339, "init_timer_key" },
+	{ 0x15ba50a6, "jiffies" },
+	{ 0xc38c83b8, "mod_timer" },
 	{ 0xe3ec2f2b, "alloc_chrdev_region" },
 	{ 0xa304a8e0, "cdev_init" },
-	{ 0xb51d50, "cdev_add" },
-	{ 0x33c47e0e, "class_create" },
 	{ 0xb2b23fc2, "module_layout" },
 };
 
 MODULE_INFO(depends, "");
 
 
-MODULE_INFO(srcversion, "48772076DB97063899C4C2A");
+MODULE_INFO(srcversion, "990C0CE622242663A659348");
